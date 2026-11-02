@@ -9,7 +9,7 @@ pipelines take it from there — evaluate in `MLOPS_QA`, then deploy to
 there, authenticating with Workload Identity Federation (OIDC).
 
 The detailed walkthrough behind this repo is on Medium:
-[Git-Driven Model Promotion in Snowflake (WIP title)](BLOG_POST_URL). <!-- TODO: replace with the published URL -->
+[Ship ML Models on Snowflake the Way You Ship Code](BLOG_POST_URL). <!-- TODO: replace with the published URL -->
 
 <!-- GitHub renders the mermaid block below; Azure Repos only shows the image above. -->
 
