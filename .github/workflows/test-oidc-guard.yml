@@ -1,0 +1,20 @@
+# .github/workflows/test-oidc-guard.yml
+name: Test OIDC guard (should fail)
+on:
+  push:
+    branches: [dev]
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    environment: prod          # <-- requesting prod from a non-main branch
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: snowflakedb/snowflake-actions@v3
+        with:
+          use-oidc: true
+          cli-version: "3.16"
+      - env:
+          SNOWFLAKE_ACCOUNT: ${{ secrets.SNOWFLAKE_ACCOUNT }}
+        run: snow connection test -x --role MLOPS_PROD_ROLE

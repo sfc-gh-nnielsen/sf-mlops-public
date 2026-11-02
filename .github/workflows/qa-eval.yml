@@ -1,0 +1,48 @@
+name: QA evaluation
+
+# Triggered when a pull request targeting the `qa` branch (e.g. from `dev`)
+# is opened, updated, or reopened. Authenticates as MLOPS_QA_SVC (via OIDC)
+# using MLOPS_QA_ROLE. Does not know or care about any specific model version
+# -- it resolves whatever currently holds the DEV alias in MLOPS_DEV at run
+# time.
+#
+# The `environment: qa` declaration is critical: it causes GitHub to issue an
+# OIDC token with subject `repo:sfc-gh-nnielsen/sf-mlops:environment:qa`,
+# which is the only subject MLOPS_QA_SVC will accept. Without it, the job
+# cannot authenticate to Snowflake.
+on:
+  pull_request:
+    branches: [qa]
+    paths:
+      - "notebooks/**"
+      - "scripts/**"
+
+jobs:
+  evaluate:
+    runs-on: ubuntu-latest
+    environment: qa
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: snowflakedb/snowflake-actions@v3
+        with:
+          use-oidc: true
+          cli-version: "3.16"
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -r scripts/requirements.txt
+
+      - name: Evaluate DEV candidate against QA holdout set
+        env:
+          SNOWFLAKE_ACCOUNT: ${{ secrets.SNOWFLAKE_ACCOUNT }}
+          SNOWFLAKE_WAREHOUSE: ${{ secrets.SNOWFLAKE_WAREHOUSE }}
+        run: python scripts/qa_evaluate.py

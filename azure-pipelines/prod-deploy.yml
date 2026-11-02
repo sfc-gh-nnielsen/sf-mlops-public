@@ -1,0 +1,73 @@
+# Azure DevOps pipeline: PROD deployment
+#
+# Equivalent of .github/workflows/prod-deploy.yml.
+# Runs on pushes to `main` (i.e. after a qa -> main PR merge) that touch
+# notebooks/ or scripts/. Authenticates as MLOPS_PROD_SVC via OIDC through
+# the `snowflake-prod` service connection -- which should be restricted to
+# `main` with a Branch control check (see setup/azure-devops/README.md).
+#
+# Variables come from the `sf-mlops` variable group. Secret variables are not
+# injected into scripts automatically, so every step maps them in `env:`.
+#
+# Reference: https://docs.snowflake.com/en/developer-guide/snowflake-cli/cicd/azure-devops-extension
+
+trigger:
+  branches:
+    include:
+      - main
+  paths:
+    include:
+      - notebooks/**
+      - scripts/**
+
+pr: none
+
+pool:
+  name: nnielsen-mbp
+
+variables:
+  - group: sf-mlops
+  # Self-hosted agent: Python interpreter on the agent machine (not on the
+  # agent PATH). Each run builds a throwaway venv from it.
+  - name: PYTHON
+    value: /usr/local/bin/python3.11
+  - name: VENV
+    value: $(Agent.TempDirectory)/venv
+
+steps:
+  - task: ConfigureSnowflakeCLI@1
+    displayName: 'Configure Snowflake CLI (OIDC)'
+    # Extension 1.2.0 logs "supports Linux agents only" on macOS agents but still
+    # configures OIDC; don't let that message fail the run. A real auth problem
+    # still fails the next step (snow connection test).
+    continueOnError: true
+    inputs:
+      cliVersion: 'latest'
+      configFilePath: 'azure-pipelines/config.toml'
+      useWorkloadIdentity: true
+      connectedServiceName: 'snowflake-prod'
+    env:
+      # Self-hosted agent: use the Snowflake CLI already installed on it.
+      DISABLE_SNOW_INSTALLATION_WITH_PIPX: 'true'
+      # The task copies config.toml to $HOME/.snowflake/. Point HOME at a temp
+      # dir so it never overwrites the agent user's own Snowflake config.
+      HOME: $(Agent.TempDirectory)
+
+  - script: |
+      "$(PYTHON)" -m venv "$(VENV)"
+      "$(VENV)/bin/pip" install -q -r scripts/requirements.txt
+    displayName: 'Install Python dependencies'
+
+  - script: snow --version && snow connection test -x --role MLOPS_PROD_ROLE
+    displayName: 'Verify Snowflake connection'
+    env:
+      SNOWFLAKE_ACCOUNT: $(SNOWFLAKE_ACCOUNT)
+      SNOWFLAKE_USER: MLOPS_PROD_SVC
+      SNOWFLAKE_TOKEN: $(SNOWFLAKE_TOKEN)
+
+  - script: '"$(VENV)/bin/python" scripts/prod_deploy.py'
+    displayName: 'Promote QA-passed candidate to PROD default'
+    env:
+      SNOWFLAKE_ACCOUNT: $(SNOWFLAKE_ACCOUNT)
+      SNOWFLAKE_WAREHOUSE: $(SNOWFLAKE_WAREHOUSE)
+      SNOWFLAKE_TOKEN: $(SNOWFLAKE_TOKEN)

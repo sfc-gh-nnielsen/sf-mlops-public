@@ -1,0 +1,49 @@
+name: PROD deployment
+
+# Triggered whenever a change lands on `main` (e.g. a PR merge from `qa` after
+# review). Authenticates as MLOPS_PROD_SVC (via OIDC) using MLOPS_PROD_ROLE.
+# Promotes whichever version currently holds the QA_PASSED alias in MLOPS_QA
+# -- if qa-eval.yml never set that alias (evaluation failed, hasn't run, or
+# the candidate was already promoted), this workflow succeeds as a no-op.
+#
+# The `environment: prod` declaration causes GitHub to issue an OIDC token with
+# subject `repo:sfc-gh-nnielsen/sf-mlops:environment:prod`. This is the ONLY
+# subject MLOPS_PROD_SVC will accept, and the `prod` GitHub Environment is
+# locked to the `main` branch -- so a feature branch or rogue workflow cannot
+# obtain a valid token for the production Snowflake identity.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "notebooks/**"
+      - "scripts/**"
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: prod
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: snowflakedb/snowflake-actions@v3
+        with:
+          use-oidc: true
+          cli-version: "3.16"
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -r scripts/requirements.txt
+
+      - name: Promote QA-passed candidate to PROD default
+        env:
+          SNOWFLAKE_ACCOUNT: ${{ secrets.SNOWFLAKE_ACCOUNT }}
+          SNOWFLAKE_WAREHOUSE: ${{ secrets.SNOWFLAKE_WAREHOUSE }}
+        run: python scripts/prod_deploy.py

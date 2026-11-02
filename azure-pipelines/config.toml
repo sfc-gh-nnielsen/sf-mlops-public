@@ -1,0 +1,4 @@
+# Intentionally empty. ConfigureSnowflakeCLI@1 (extension 1.2.0) fails with
+# ENOENT if its `configFilePath` doesn't exist. The pipelines connect with
+# `-x` (temporary connection from environment variables), so no connections
+# are defined here. Never put credentials in this file.

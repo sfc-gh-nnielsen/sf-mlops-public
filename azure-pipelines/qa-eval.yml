@@ -1,0 +1,67 @@
+# Azure DevOps pipeline: QA evaluation
+#
+# Equivalent of .github/workflows/qa-eval.yml.
+# Authenticates as MLOPS_QA_SVC via OIDC through the `snowflake-qa` service
+# connection.
+#
+# TRIGGER: for Azure Repos Git, the `pr:` keyword is IGNORED. This pipeline
+# runs on PRs into `qa` only because of a Build Validation branch policy on
+# `qa` that points at it (see setup/azure-devops/README.md). Path filters are
+# set on that policy too.
+#
+# Variables come from the `sf-mlops` variable group. Secret variables are not
+# injected into scripts automatically, so every step maps them in `env:`.
+#
+# Reference: https://docs.snowflake.com/en/developer-guide/snowflake-cli/cicd/azure-devops-extension
+
+trigger: none
+
+pool:
+  name: nnielsen-mbp
+
+variables:
+  - group: sf-mlops
+  # Self-hosted agent: Python interpreter on the agent machine (not on the
+  # agent PATH). Each run builds a throwaway venv from it.
+  - name: PYTHON
+    value: /usr/local/bin/python3.11
+  - name: VENV
+    value: $(Agent.TempDirectory)/venv
+
+steps:
+  - task: ConfigureSnowflakeCLI@1
+    displayName: 'Configure Snowflake CLI (OIDC)'
+    # Extension 1.2.0 logs "supports Linux agents only" on macOS agents but still
+    # configures OIDC; don't let that message fail the run. A real auth problem
+    # still fails the next step (snow connection test).
+    continueOnError: true
+    inputs:
+      cliVersion: 'latest'
+      configFilePath: 'azure-pipelines/config.toml'
+      useWorkloadIdentity: true
+      connectedServiceName: 'snowflake-qa'
+    env:
+      # Self-hosted agent: use the Snowflake CLI already installed on it.
+      DISABLE_SNOW_INSTALLATION_WITH_PIPX: 'true'
+      # The task copies config.toml to $HOME/.snowflake/. Point HOME at a temp
+      # dir so it never overwrites the agent user's own Snowflake config.
+      HOME: $(Agent.TempDirectory)
+
+  - script: |
+      "$(PYTHON)" -m venv "$(VENV)"
+      "$(VENV)/bin/pip" install -q -r scripts/requirements.txt
+    displayName: 'Install Python dependencies'
+
+  - script: snow --version && snow connection test -x --role MLOPS_QA_ROLE
+    displayName: 'Verify Snowflake connection'
+    env:
+      SNOWFLAKE_ACCOUNT: $(SNOWFLAKE_ACCOUNT)
+      SNOWFLAKE_USER: MLOPS_QA_SVC
+      SNOWFLAKE_TOKEN: $(SNOWFLAKE_TOKEN)
+
+  - script: '"$(VENV)/bin/python" scripts/qa_evaluate.py'
+    displayName: 'Evaluate DEV candidate against QA holdout set'
+    env:
+      SNOWFLAKE_ACCOUNT: $(SNOWFLAKE_ACCOUNT)
+      SNOWFLAKE_WAREHOUSE: $(SNOWFLAKE_WAREHOUSE)
+      SNOWFLAKE_TOKEN: $(SNOWFLAKE_TOKEN)
